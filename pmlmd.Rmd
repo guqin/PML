@@ -1,0 +1,73 @@
+---
+title: "Practical ML"
+author: "Ralph Knag"
+date: "Wednesday, December 17, 2014"
+output: html_document
+---
+
+Barbell Lift Detection Model
+
+I wasn't sure how to approach this problem.  At first I thought about just doing a linear regression, but after looking at the data I realized there were a fair number of predictors.  I thought I should try to reduce them if using a linear model (perhaps by using PCA).  Then I read the Wearable Computing document by  Wallace Ugulino, Débora Cardador, Katia Vega, Eduardo Velloso, Ruy Milidiú and Hugo Fuks and noticed that they had used random forests.  I decided to try this method out for the first time. 
+
+I soon realized that the data needed cleaning.  I got rid of variables with lots of NA's and converted the divide by zero variables.  Then I split the data into a train and also a test set for final error prediction after random forest cross validation done by train.  
+
+
+```{r echo=TRUE}
+# read in the tranining (really used for both training and initial testing). Convert divide by zero to NA
+training <- read.csv("C:/TEMP/pml-training.csv", header=TRUE,sep=",",na.strings=c("NA", "#DIV/0!"))
+# the first seven variables are not useful (timestamps and state information)
+ctraining <- training[,8:160]
+require(caret)
+# get rid of mostly NA variables 
+ctrainingfilterna <- ctraining[,colSums(is.na(ctraining)) <  1000]
+# get rid of remaining rows with NA
+ctrainingnona <- ctrainingfilterna[complete.cases(ctrainingfilterna),]
+# split into test and train
+set.seed(1356)
+dp <- createDataPartition(ctrainingnona$classe, p=.6, list=FALSE)
+train <- ctrainingnona[dp,]
+test <- ctrainingnona[-dp,]
+```
+Then I used caret's train to run a cross validation.  I used the oob method at first and it ran much faster, but I guess it's not quite a "cross validation" technique, although it appears to be similar.  I finally tried cross validation with 5 folds to tune the model's variables. I look at the model to see what was selected. I also examined the importance of the variables using importance.  I plot the model to see the number of trees used.  I also run rfcv to look for overfitting because of too many variables.    
+```{r echo=TRUE}
+rf <- train(ctrainingnona[,1:length(ctrainingnona)-1], ctrainingnona$classe, method = "rf",   trControl = trainControl(method = "cv", number=5), importance = TRUE, verbose = TRUE, na.action="omit")
+rf
+df <- data.frame(importance(rf$finalModel))
+df[order(df$MeanDecreaseGini,decreasing=TRUE),]
+plot(rf$finalModel)
+# look at rfcv to use cross validation to check for overfitting 
+trfcv <- rfcv(ctrainingnona[,1:length(ctrainingnona)-1], ctrainingnona$classe,cv.fold=5)
+#looks like there fewer variables are possible if we overfit. 
+with(trfcv, plot(n.var, error.cv, log="x", type="o", lwd=2))
+
+```
+Now I examine the test results.  Wow - looking good so no feature reduction 
+```{r echo=TRUE}
+pred <- predict(rf$finalModel, test)
+confusionMatrix(pred, test$classe)
+
+
+```
+Finally I read in the final test cases for submission, do the prediction and write out the results. 
+```{r echo=TRUE}
+
+testing <- read.csv("C:/TEMP/pml-testing.csv", header=TRUE,sep=",",na.strings=c("NA", "#DIV/0!"))
+# the first seven variables are not useful (timestamps and state information)
+ctesting <- testing[,8:159]
+# get rid of mostly NA variables 
+ctestingfilterna <- ctesting[,colSums(is.na(ctesting)) == 0]
+# get rid of remaining rows with NA
+ctestingnona <- ctestingfilterna[complete.cases(ctestingfilterna),]
+ptest <-  predict(rf$finalModel, ctestingnona)
+ptest
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(ptest)
+
+```
